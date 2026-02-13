@@ -1,0 +1,106 @@
+package services
+
+import (
+	"net/http"
+	"os"
+	"time"
+	"url-shortener/config"
+	"url-shortener/models"
+	"url-shortener/utils"
+
+	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
+)
+
+func RegisterUser(c *gin.Context) {
+	var user models.User
+	if err := c.ShouldBindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, utils.ResponseError(err.Error()))
+		return
+	}
+
+	validate := validator.New()
+	if err := validate.Struct(user); err != nil {
+		c.JSON(http.StatusBadRequest, utils.ResponseError(err.Error()))
+		return
+	}
+
+	var existing models.User
+	if err := config.DB.Where("email = ?", user.Email).First(&existing).Error; err == nil {
+		c.JSON(http.StatusConflict, utils.ResponseError("email already registered"))
+		return
+	}
+
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, utils.ResponseError("failed to hash password"))
+		return
+	}
+	user.Password = string(hashedPassword)
+
+	config.DB.Create(&user)
+	user.Password = ""
+	c.JSON(http.StatusCreated,  utils.ResponseSuccess("User registered successfully"))
+}
+
+func LoginUser(c *gin.Context) {
+	var input struct {
+		Email    string `json:"email" validate:"required,email"`
+		Password string `json:"password" validate:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	validate := validator.New()
+	if err := validate.Struct(input); err != nil {
+		c.JSON(http.StatusBadRequest, utils.ResponseError(err.Error()))
+		return
+	}
+
+	var user models.User
+	if err := config.DB.Where("email = ?", input.Email).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, utils.ResponseError("invalid credentials"))
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
+		c.JSON(http.StatusUnauthorized, utils.ResponseError("invalid credentials"))
+		return
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.ID,
+		"exp":     time.Now().Add(time.Hour * 24).Unix(),
+	})
+	tokenString, _ := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+
+	c.JSON(http.StatusOK, utils.ResponseSuccess(gin.H{
+		"token": tokenString,
+	}))
+}
+
+func GetUsers(c *gin.Context) {
+	page := c.DefaultQuery("page", "1")
+	limit := c.DefaultQuery("limit", "10")
+
+	pageInt := utils.ParseInt(page)
+	limitInt := utils.ParseInt(limit)
+	offset := (pageInt - 1) * limitInt
+
+	var users []models.User
+	if err := config.DB.Limit(limitInt).Offset(offset).Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, utils.ResponseError(err.Error()))
+		return
+	}
+
+	for i := range users {
+		users[i].Password = ""
+	}
+
+	c.JSON(http.StatusOK, utils.ResponseSuccess(users))
+}

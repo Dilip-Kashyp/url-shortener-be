@@ -1,0 +1,47 @@
+package main
+
+import (
+	"url-shortener/config"
+	"url-shortener/middleware"
+	"url-shortener/models"
+	"url-shortener/routes"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.Default()
+
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Content-Type", "Authorization", "X-Session-Token"},
+		ExposeHeaders:    []string{"X-Session-Token"},
+		AllowCredentials: true,
+	}))
+	r.Use(middleware.Logger())
+
+	config.ConnectDB()
+	config.ConnectRedis()
+	config.DB.AutoMigrate(&models.User{}, &models.URL{}, &models.GuestSession{}, &models.Click{})
+
+	v1 := r.Group("/api/v1")
+	routes.PingRoutes(v1)
+	routes.RegisterRoutes(v1)
+	routes.URLRoutes(v1)
+
+	// go func() {
+	// 	ticker := time.NewTicker(24 * time.Hour) // Run daily
+	// 	defer ticker.Stop()
+	// 	for {
+	// 		select {
+	// 		case <-ticker.C:
+	// 			utils.CleanupExpiredData()
+	// 		}
+	// 	}
+	// }()
+
+	r.Run(":8080")
+}
