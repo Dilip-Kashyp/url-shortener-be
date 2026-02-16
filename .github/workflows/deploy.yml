@@ -41,10 +41,7 @@ jobs:
             git pull origin main
 
             echo "Deploying new version..."
-            docker compose down
-            docker compose up -d --build
-            docker image prune -f
-
+            make deploy
             echo "Deployment completed successfully"
 
       - name: Health Check
