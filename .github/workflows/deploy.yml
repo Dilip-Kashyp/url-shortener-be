@@ -32,7 +32,7 @@ jobs:
           key: ${{ secrets.OCI_SSH_KEY }}
           script: |
             set -e
-            cd /apps/url-shortener-be
+            cd ~/apps/url-shortener-be
 
             echo "Creating backup..."
             docker compose ps > /tmp/pre-deploy-state.txt
@@ -76,7 +76,7 @@ jobs:
           key: ${{ secrets.OCI_SSH_KEY }}
           script: |
             echo "Deployment failed, rolling back..."
-            cd /apps/url-shortener-be
+            cd ~/apps/url-shortener-be
             git reset --hard HEAD~1
             docker compose down
             docker compose up -d --build
