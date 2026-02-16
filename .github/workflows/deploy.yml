@@ -1,0 +1,91 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  # ---- Job 1: Test ----
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Run Tests
+        run: go test ./...
+
+  # ---- Job 2: Deploy (only if tests pass) ----
+  deploy:
+    needs: test          # waits for test job to pass
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to OCI
+        id: deploy
+        uses: appleboy/ssh-action@master
+        timeout-minutes: 10
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USER }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            set -e  # Exit on any error
+            cd /apps/url-shortener
+            
+            # Backup current state
+            echo "Creating backup..."
+            docker compose ps > /tmp/pre-deploy-state.txt
+            
+            # Pull latest code
+            echo "Pulling latest code..."
+            git pull origin main
+            
+            # Deploy new version
+            echo "Deploying new version..."
+            docker compose down
+            docker compose up -d --build
+            docker image prune -f
+            
+            echo "Deployment completed successfully"
+
+      # Wait then check if app is healthy
+      - name: Health Check
+        uses: appleboy/ssh-action@master
+        timeout-minutes: 2
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USER }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            echo "Waiting for services to start..."
+            sleep 15
+            
+            # Check if app is healthy
+            if curl -f http://localhost:8080/test/ping; then
+              echo "App is healthy"
+              exit 0
+            else
+              echo "App health check failed"
+              exit 1
+            fi
+
+      # Rollback if health check fails
+      - name: Rollback on Failure
+        if: failure() && steps.deploy.outcome == 'success'
+        uses: appleboy/ssh-action@master
+        timeout-minutes: 5
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USER }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            echo "Deployment failed, rolling back..."
+            cd /apps/url-shortener
+            git reset --hard HEAD~1
+            docker compose down
+            docker compose up -d --build
+            echo "Rollback completed"

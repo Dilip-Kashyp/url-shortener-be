@@ -1,12 +1,12 @@
-package services
+package service
 
 import (
 	"net/http"
 	"os"
 	"time"
-	"url-shortener/config"
-	"url-shortener/models"
-	"url-shortener/utils"
+	"url-shortener/internal/config"
+	"url-shortener/internal/models"
+	"url-shortener/internal/util"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -17,33 +17,32 @@ import (
 func RegisterUser(c *gin.Context) {
 	var user models.User
 	if err := c.ShouldBindJSON(&user); err != nil {
-		c.JSON(http.StatusBadRequest, utils.ResponseError(err.Error()))
+		c.JSON(http.StatusBadRequest, util.ResponseError(err.Error()))
 		return
 	}
 
 	validate := validator.New()
 	if err := validate.Struct(user); err != nil {
-		c.JSON(http.StatusBadRequest, utils.ResponseError(err.Error()))
+		c.JSON(http.StatusBadRequest, util.ResponseError(err.Error()))
 		return
 	}
 
 	var existing models.User
 	if err := config.DB.Where("email = ?", user.Email).First(&existing).Error; err == nil {
-		c.JSON(http.StatusConflict, utils.ResponseError("email already registered"))
+		c.JSON(http.StatusConflict, util.ResponseError("email already registered"))
 		return
 	}
 
-
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, utils.ResponseError("failed to hash password"))
+		c.JSON(http.StatusInternalServerError, util.ResponseError("failed to hash password"))
 		return
 	}
 	user.Password = string(hashedPassword)
 
 	config.DB.Create(&user)
 	user.Password = ""
-	c.JSON(http.StatusCreated,  utils.ResponseSuccess("User registered successfully"))
+	c.JSON(http.StatusCreated, util.ResponseSuccess("User registered successfully"))
 }
 
 func LoginUser(c *gin.Context) {
@@ -58,18 +57,18 @@ func LoginUser(c *gin.Context) {
 
 	validate := validator.New()
 	if err := validate.Struct(input); err != nil {
-		c.JSON(http.StatusBadRequest, utils.ResponseError(err.Error()))
+		c.JSON(http.StatusBadRequest, util.ResponseError(err.Error()))
 		return
 	}
 
 	var user models.User
 	if err := config.DB.Where("email = ?", input.Email).First(&user).Error; err != nil {
-		c.JSON(http.StatusUnauthorized, utils.ResponseError("invalid credentials"))
+		c.JSON(http.StatusUnauthorized, util.ResponseError("invalid credentials"))
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
-		c.JSON(http.StatusUnauthorized, utils.ResponseError("invalid credentials"))
+		c.JSON(http.StatusUnauthorized, util.ResponseError("invalid credentials"))
 		return
 	}
 
@@ -79,28 +78,26 @@ func LoginUser(c *gin.Context) {
 	})
 	tokenString, _ := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
 
-	c.JSON(http.StatusOK, utils.ResponseSuccess(gin.H{
+	c.JSON(http.StatusOK, util.ResponseSuccess(gin.H{
 		"token": tokenString,
 	}))
 }
 
 func GetUsers(c *gin.Context) {
-	page := c.DefaultQuery("page", "1")
-	limit := c.DefaultQuery("limit", "10")
-
-	pageInt := utils.ParseInt(page)
-	limitInt := utils.ParseInt(limit)
-	offset := (pageInt - 1) * limitInt
-
 	var users []models.User
-	if err := config.DB.Limit(limitInt).Offset(offset).Find(&users).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, utils.ResponseError(err.Error()))
+
+	userID, ok := util.GetUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, util.ResponseError("invalid token"))
 		return
 	}
+
+	config.DB.Where("id = ?", userID).Find(&users)
 
 	for i := range users {
 		users[i].Password = ""
 	}
 
-	c.JSON(http.StatusOK, utils.ResponseSuccess(users))
+	c.JSON(http.StatusOK, util.ResponseSuccess(users))
 }
+

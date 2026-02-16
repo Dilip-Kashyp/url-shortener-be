@@ -1,11 +1,12 @@
-package services
+package service
 
 import (
 	"net/http"
+	"os"
 	"time"
-	"url-shortener/config"
-	"url-shortener/models"
-	"url-shortener/utils"
+	"url-shortener/internal/config"
+	"url-shortener/internal/models"
+	"url-shortener/internal/util"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -17,11 +18,11 @@ func ShortenURL(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, utils.ResponseError(err.Error()))
+		c.JSON(http.StatusBadRequest, util.ResponseError(err.Error()))
 		return
 	}
 
-	shortCode := utils.GenerateShortCode()
+	shortCode := util.GenerateShortCode()
 
 	url := models.URL{
 		OriginalURL: input.OriginalURL,
@@ -33,7 +34,7 @@ func ShortenURL(c *gin.Context) {
 		// Validate that the user exists before associating the URL
 		var user models.User
 		if err := config.DB.First(&user, userIDValue).Error; err != nil {
-			c.JSON(http.StatusUnauthorized, utils.ResponseError("user not found"))
+			c.JSON(http.StatusUnauthorized, util.ResponseError("user not found"))
 			return
 		}
 		url.UserID = &userIDValue
@@ -43,18 +44,18 @@ func ShortenURL(c *gin.Context) {
 	}
 
 	if err := config.DB.Create(&url).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, utils.ResponseError(err.Error()))
+		c.JSON(http.StatusInternalServerError, util.ResponseError(err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusCreated, utils.ResponseSuccess(gin.H{
+	c.JSON(http.StatusCreated, util.ResponseSuccess(gin.H{
 		"short_code": shortCode,
-		"short_url":  "http://localhost:8080/api/v1/" + shortCode,
+		"short_url":  os.Getenv("SERVER_URL") + "/url/redirect/" + shortCode,
 	}))
 }
 
 func RedirectURL(c *gin.Context) {
-	shortCode := c.Param("shortCode")
+	shortCode := c.Param("code")
 
 	// Check cache
 	cachedURL, err := config.RedisClient.Get(config.RedisClient.Context(), shortCode).Result()
@@ -62,11 +63,11 @@ func RedirectURL(c *gin.Context) {
 		// Find URL first to get ID for click record
 		var url models.URL
 		if err := config.DB.Where("short_code = ?", shortCode).First(&url).Error; err != nil {
-			c.JSON(http.StatusNotFound, utils.ResponseError("URL not found"))
+			c.JSON(http.StatusNotFound, util.ResponseError("URL not found"))
 			return
 		}
 		if url.ExpiresAt != nil && time.Now().After(*url.ExpiresAt) {
-			c.JSON(http.StatusGone, utils.ResponseError("URL expired"))
+			c.JSON(http.StatusGone, util.ResponseError("URL expired"))
 			return
 		}
 
@@ -88,12 +89,12 @@ func RedirectURL(c *gin.Context) {
 
 	var url models.URL
 	if err := config.DB.Where("short_code = ?", shortCode).First(&url).Error; err != nil {
-		c.JSON(http.StatusNotFound, utils.ResponseError("URL not found"))
+		c.JSON(http.StatusNotFound, util.ResponseError("URL not found"))
 		return
 	}
 
 	if url.ExpiresAt != nil && time.Now().After(*url.ExpiresAt) {
-		c.JSON(http.StatusGone, utils.ResponseError("URL expired"))
+		c.JSON(http.StatusGone, util.ResponseError("URL expired"))
 		return
 	}
 
@@ -119,8 +120,8 @@ func RedirectURL(c *gin.Context) {
 func GetHistory(c *gin.Context) {
 	var urls []models.URL
 
-	page := utils.ParseInt(c.DefaultQuery("page", "1"))
-	limit := utils.ParseInt(c.DefaultQuery("limit", "10"))
+	page := util.ParseInt(c.DefaultQuery("page", "1"))
+	limit := util.ParseInt(c.DefaultQuery("limit", "10"))
 
 	if page < 1 {
 		page = 1
@@ -138,7 +139,7 @@ func GetHistory(c *gin.Context) {
 	} else {
 		sessionID := c.GetUint("session_id")
 		if sessionID == 0 {
-			c.JSON(http.StatusUnauthorized, utils.ResponseError("unauthorized"))
+			c.JSON(http.StatusUnauthorized, util.ResponseError("unauthorized"))
 			return
 		}
 		query = query.Where("session_id = ?", sessionID)
@@ -150,7 +151,7 @@ func GetHistory(c *gin.Context) {
 		Offset(offset).
 		Find(&urls).Error; err != nil {
 
-		c.JSON(http.StatusInternalServerError, utils.ResponseError(err.Error()))
+		c.JSON(http.StatusInternalServerError, util.ResponseError(err.Error()))
 		return
 	}
 
@@ -160,14 +161,14 @@ func GetHistory(c *gin.Context) {
 			ID:          u.ID,
 			OriginalURL: u.OriginalURL,
 			ShortCode:   u.ShortCode,
-			ShortURL:    "http://localhost:8080/api/v1/" + u.ShortCode,
+			ShortURL:    os.Getenv("SERVER_URL") + "/url/redirect/" + u.ShortCode,
 			Clicks:      u.Clicks,
 			ExpiresAt:   u.ExpiresAt,
 			CreatedAt:   u.CreatedAt,
 		})
 	}
 
-	c.JSON(http.StatusOK, utils.ResponseSuccess(gin.H{
+	c.JSON(http.StatusOK, util.ResponseSuccess(gin.H{
 		"history": history,
 		"meta": gin.H{
 			"page":  page,
@@ -178,39 +179,47 @@ func GetHistory(c *gin.Context) {
 }
 
 func DeleteURL(c *gin.Context) {
-	shortCode := c.Param("shortCode")
+	shortCode := c.Param("code")
+	if shortCode == "" {
+		c.JSON(http.StatusBadRequest, util.ResponseError("code is required"))
+		return
+	}
+
 	var url models.URL
 	query := config.DB.Where("short_code = ?", shortCode)
 
-	if userID, ok := c.Get("user_id"); ok {
+	// NEW AUTH FLOW
+	if userID, ok := util.GetUserID(c); ok {
 		query = query.Where("user_id = ?", userID)
 	} else {
 		sessionID := c.GetUint("session_id")
 		if sessionID == 0 {
-			c.JSON(http.StatusUnauthorized, utils.ResponseError("unauthorized"))
+			c.JSON(http.StatusUnauthorized, util.ResponseError("unauthorized"))
 			return
 		}
 		query = query.Where("session_id = ?", sessionID)
 	}
 
 	if err := query.First(&url).Error; err != nil {
-		c.JSON(http.StatusNotFound, utils.ResponseError("URL not found"))
+		c.JSON(http.StatusNotFound, util.ResponseError("URL not found"))
 		return
 	}
 
-	if err := config.DB.Where("url_id = ?", url.ID).Delete(&models.Click{}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, utils.ResponseError(err.Error()))
+	if err := config.DB.Where("url_id = ?", url.ID).
+		Delete(&models.Click{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, util.ResponseError(err.Error()))
 		return
 	}
 
 	if err := config.DB.Delete(&url).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, utils.ResponseError(err.Error()))
+		c.JSON(http.StatusInternalServerError, util.ResponseError(err.Error()))
 		return
 	}
 
-	config.RedisClient.Del(config.RedisClient.Context(), shortCode)
+	config.RedisClient.Del(c.Request.Context(), shortCode)
 
-	c.JSON(http.StatusOK, utils.ResponseSuccess(gin.H{
+	c.JSON(http.StatusOK, util.ResponseSuccess(gin.H{
 		"message": "URL deleted successfully",
 	}))
 }
+

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"url-shortener/config"
-	"url-shortener/models"
+	"url-shortener/internal/config"
+	"url-shortener/internal/models"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"

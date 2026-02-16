@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 	"time"
-	"url-shortener/config"
-	"url-shortener/models"
+	"url-shortener/internal/config"
+	"url-shortener/internal/models"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -33,12 +33,11 @@ func AuthRequired() gin.HandlerFunc {
 		}
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			c.Set("user_id", uint(claims["user_id"].(float64)))
+			c.Set("token_claims", claims)
 		}
 		c.Next()
 	}
 }
-
 
 func GenerateTokens(userID uint) (string, string) {
 	accessClaims := jwt.MapClaims{
@@ -60,7 +59,6 @@ func GenerateTokens(userID uint) (string, string) {
 	return accessToken, refreshToken
 }
 
-
 func LinkSessionToUser(c *gin.Context, userID uint) {
 	sessionToken := c.GetHeader("X-Session-Token")
 	if sessionToken == "" {
@@ -77,7 +75,6 @@ func LinkSessionToUser(c *gin.Context, userID uint) {
 		Where("session_token = ?", sessionToken).
 		Update("session_token", nil)
 }
-
 
 func RefreshToken(c *gin.Context) {
 	var input struct {

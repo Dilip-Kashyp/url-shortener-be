@@ -1,10 +1,10 @@
 package main
 
 import (
-	"url-shortener/config"
-	"url-shortener/middleware"
-	"url-shortener/models"
-	"url-shortener/routes"
+	"url-shortener/internal/config"
+	"url-shortener/internal/handler"
+	"url-shortener/internal/middleware"
+	"url-shortener/internal/models"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -28,9 +28,9 @@ func main() {
 	config.DB.AutoMigrate(&models.User{}, &models.URL{}, &models.GuestSession{}, &models.Click{})
 
 	v1 := r.Group("/api/v1")
-	routes.PingRoutes(v1)
-	routes.RegisterRoutes(v1)
-	routes.URLRoutes(v1)
+	handler.PingRoutes(v1)
+	handler.RegisterRoutes(v1)
+	handler.URLRoutes(v1)
 
 	// go func() {
 	// 	ticker := time.NewTicker(24 * time.Hour) // Run daily
