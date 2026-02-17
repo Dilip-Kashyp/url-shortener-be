@@ -57,34 +57,36 @@ func ShortenURL(c *gin.Context) {
 func RedirectURL(c *gin.Context) {
 	shortCode := c.Param("code")
 
-	// Check cache
-	cachedURL, err := config.RedisClient.Get(config.RedisClient.Context(), shortCode).Result()
-	if err == nil {
-		// Find URL first to get ID for click record
-		var url models.URL
-		if err := config.DB.Where("short_code = ?", shortCode).First(&url).Error; err != nil {
-			c.JSON(http.StatusNotFound, util.ResponseError("URL not found"))
-			return
-		}
-		if url.ExpiresAt != nil && time.Now().After(*url.ExpiresAt) {
-			c.JSON(http.StatusGone, util.ResponseError("URL expired"))
-			return
-		}
+	// Check cache (skip if Redis is not available)
+	if config.RedisClient != nil {
+		cachedURL, err := config.RedisClient.Get(config.RedisClient.Context(), shortCode).Result()
+		if err == nil {
+			// Find URL first to get ID for click record
+			var url models.URL
+			if err := config.DB.Where("short_code = ?", shortCode).First(&url).Error; err != nil {
+				c.JSON(http.StatusNotFound, util.ResponseError("URL not found"))
+				return
+			}
+			if url.ExpiresAt != nil && time.Now().After(*url.ExpiresAt) {
+				c.JSON(http.StatusGone, util.ResponseError("URL expired"))
+				return
+			}
 
-		// Create click record
-		ip := c.ClientIP()
-		userAgent := c.GetHeader("User-Agent")
-		click := models.Click{
-			URLID:     url.ID,
-			IP:        ip,
-			UserAgent: userAgent,
+			// Create click record
+			ip := c.ClientIP()
+			userAgent := c.GetHeader("User-Agent")
+			click := models.Click{
+				URLID:     url.ID,
+				IP:        ip,
+				UserAgent: userAgent,
+			}
+			if err := config.DB.Create(&click).Error; err != nil {
+				// Log error but don't fail the redirect
+			}
+			config.DB.Model(&url).Update("clicks", gorm.Expr("clicks + 1"))
+			c.Redirect(http.StatusMovedPermanently, cachedURL)
+			return
 		}
-		if err := config.DB.Create(&click).Error; err != nil {
-			// Log error but don't fail the redirect
-		}
-		config.DB.Model(&url).Update("clicks", gorm.Expr("clicks + 1"))
-		c.Redirect(http.StatusMovedPermanently, cachedURL)
-		return
 	}
 
 	var url models.URL
@@ -110,8 +112,10 @@ func RedirectURL(c *gin.Context) {
 		// Log error but don't fail the redirect
 	}
 
-	// Cache
-	config.RedisClient.Set(config.RedisClient.Context(), shortCode, url.OriginalURL, time.Hour)
+	// Cache (skip if Redis is not available)
+	if config.RedisClient != nil {
+		config.RedisClient.Set(config.RedisClient.Context(), shortCode, url.OriginalURL, time.Hour)
+	}
 
 	config.DB.Model(&url).Update("clicks", url.Clicks+1)
 	c.Redirect(http.StatusMovedPermanently, url.OriginalURL)
@@ -216,10 +220,12 @@ func DeleteURL(c *gin.Context) {
 		return
 	}
 
-	config.RedisClient.Del(c.Request.Context(), shortCode)
+	// Clear cache (skip if Redis is not available)
+	if config.RedisClient != nil {
+		config.RedisClient.Del(c.Request.Context(), shortCode)
+	}
 
 	c.JSON(http.StatusOK, util.ResponseSuccess(gin.H{
 		"message": "URL deleted successfully",
 	}))
 }
-

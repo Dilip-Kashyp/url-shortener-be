@@ -4,7 +4,7 @@ APP_NAME=url-shortener
 include .env
 export
 
-.PHONY: dev prod build up down logs db test test-coverage test-report deploy clean help
+.PHONY: dev prod build up down logs db deploy clean help
 
 
 dev:
@@ -38,19 +38,6 @@ logs:
 db:
 	docker exec -it postgres_db psql -U $(DB_USER) -d $(DB_NAME)
 
-## Run all tests
-test:
-	go test -v ./...
-
-## Run tests with coverage
-test-coverage:
-	go test -v -cover ./...
-
-## Run tests with coverage report
-test-report:
-	go test -v -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out
-
 # Production deploy (used by CI/CD)
 deploy:
 	git pull origin main
@@ -69,7 +56,4 @@ help:
 	@echo "  clean          - Stop containers and remove volumes"
 	@echo "  logs           - View container logs"
 	@echo "  db             - Connect to PostgreSQL"
-	@echo "  test           - Run all tests"
-	@echo "  test-coverage  - Run tests with coverage"
-	@echo "  test-report    - Generate HTML coverage report"
 	@echo "  deploy         - Deploy to production"
