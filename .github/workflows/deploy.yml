@@ -1,68 +1,29 @@
-name: Build & Deploy
+name: Build and Push Docker Image
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
-  # ---- Deploy to Production ----
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment: OCI              
+
     steps:
-      - name: Deploy to OCI
-        id: deploy
-        uses: appleboy/ssh-action@master
-        timeout-minutes: 10
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
         with:
-          host: ${{ secrets.OCI_HOST }}
-          username: ${{ secrets.OCI_USER }}
-          key: ${{ secrets.OCI_SSH_KEY }}
-          script: |
-            set -e
-            cd ~/apps/url-shortener-be
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-            echo "Creating backup..."
-            docker compose ps > /tmp/pre-deploy-state.txt
-
-            echo "Pulling latest code..."
-            git pull origin main
-
-            echo "Deploying new version..."
-            make deploy
-            echo "Deployment completed successfully"
-
-      - name: Health Check
-        uses: appleboy/ssh-action@master
-        timeout-minutes: 2
+      - name: Build and Push Image
+        uses: docker/build-push-action@v5
         with:
-          host: ${{ secrets.OCI_HOST }}
-          username: ${{ secrets.OCI_USER }}
-          key: ${{ secrets.OCI_SSH_KEY }}
-          script: |
-            echo "Waiting for services to start..."
-            sleep 15
-
-            if curl -f http://localhost:8080/test/ping; then
-              echo "App is healthy"
-              exit 0
-            else
-              echo "App health check failed"
-              exit 1
-            fi
-
-      - name: Rollback on Failure
-        if: failure() && steps.deploy.outcome == 'success'
-        uses: appleboy/ssh-action@master
-        timeout-minutes: 5
-        with:
-          host: ${{ secrets.OCI_HOST }}
-          username: ${{ secrets.OCI_USER }}
-          key: ${{ secrets.OCI_SSH_KEY }}
-          script: |
-            echo "Deployment failed, rolling back..."
-            cd ~/apps/url-shortener-be
-            git reset --hard HEAD~1
-            docker compose down
-            docker compose up -d --build
-            echo "✅ Rollback completed"    # 👈 FIX 2 - removed the '1'
+          context: .
+          push: true
+          tags: |
+            dilipkumar2/go-api:latest
+            dilipkumar2/go-api:${{ github.sha }}

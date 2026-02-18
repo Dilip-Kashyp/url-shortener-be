@@ -1,6 +1,6 @@
 services:
   api:
-    build: .
+    image: dilipkumar2/go-api:1.0.0
     container_name: go_api
     restart: unless-stopped
     env_file:
