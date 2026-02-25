@@ -34,6 +34,9 @@ func AuthRequired() gin.HandlerFunc {
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			c.Set("token_claims", claims)
+			if userIDFloat, ok := claims["user_id"].(float64); ok {
+				c.Set("user_id", uint(userIDFloat))
+			}
 		}
 		c.Next()
 	}
